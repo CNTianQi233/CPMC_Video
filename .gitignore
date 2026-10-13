@@ -1,0 +1,6 @@
+node_modules/
+out/
+__pycache__/
+# copyrighted media: supply your own copies (see README)
+assets/song.mp3
+assets/lyrics.lrc

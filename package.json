@@ -1,0 +1,17 @@
+{
+  "name": "cpmc-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Procedural MV for Cirno's Perfect Math Class",
+  "type": "module",
+  "scripts": {
+    "serve": "python3 -m http.server 8080",
+    "render": "node tools/render.mjs",
+    "stills": "node tools/render.mjs --stills 5,30,50,80,125,150,165,185,200,270",
+    "analyze": "python3 tools/analyze_audio.py",
+    "fonts": "python3 tools/build_fonts.py"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}
