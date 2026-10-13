@@ -4,3 +4,6 @@ __pycache__/
 # copyrighted media: supply your own copies (see README)
 assets/song.mp3
 assets/lyrics.lrc
+# your own character art
+assets/characters/*
+!assets/characters/characters.example.json

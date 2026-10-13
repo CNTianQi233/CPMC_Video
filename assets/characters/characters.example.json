@@ -1,0 +1,44 @@
+{
+  "_comment": "Copy to characters.json and point it at your own art. See README.",
+
+  "characters": {
+    "teacher": {
+      "name": "算数老师",
+      "sheets": [
+        {
+          "file": "teacher_a.png",
+          "grid": [4, 2],
+          "cells": ["normal", "happy", "smug", "angry", "shock", "dizzy", "sleepy", "think"]
+        },
+        {
+          "file": "teacher_b.png",
+          "grid": [4, 2],
+          "cells": ["point", "wave", "cast", "jump", "shiver", "victory", "nervous", "bow"]
+        }
+      ]
+    },
+
+    "rival": {
+      "name": "对手",
+      "scale": 0.95,
+      "sheets": [{ "file": "rival.png", "grid": [4, 4] }],
+      "files": { "dizzy": "rival_dizzy.png" }
+    },
+
+    "trickster": {
+      "name": "捣乱的",
+      "key": "#00ff00",
+      "sheets": [{ "file": "trickster.png", "grid": [4, 4] }]
+    }
+  },
+
+  "cast": {
+    "main": "teacher",
+    "boss": "rival",
+    "partner": "rival",
+    "prankster": "trickster",
+    "shrine": "teacher",
+    "healer": "rival",
+    "passengers": ["trickster", null, "rival", "teacher"]
+  }
+}

@@ -1,8 +1,10 @@
 // Browser player: plays the song and draws the MV in sync.
 // URL options: ?t=SECONDS (start position), ?offset=SECONDS (lyric timing),
-// ?render=1 (headless mode used by tools/render.mjs).
+// ?render=1 (headless mode used by tools/render.mjs),
+// ?sprites (check how character sheets were cut out).
 
 import { loadMV } from './mv.js';
+import { STATES, drawCharacter } from './sprites.js';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('mv');
@@ -10,7 +12,10 @@ const ctx = canvas.getContext('2d');
 
 const mvPromise = loadMV({ lyricOffset: parseFloat(params.get('offset')) || 0 });
 
-if (params.has('render')) {
+if (params.has('sprites')) {
+  document.body.classList.add('render');
+  mvPromise.then(showSprites);
+} else if (params.has('render')) {
   document.body.classList.add('render');
   window.MV = {
     ready: mvPromise.then((mv) => ({ duration: mv.duration })),
@@ -22,6 +27,54 @@ if (params.has('render')) {
   };
 } else {
   startPlayer();
+}
+
+/** Contact sheet of every character × state, with the fallback used if any. */
+function showSprites(mv) {
+  const W = canvas.width;
+  const H = canvas.height;
+  const only = params.get('sprites');
+  const chars = Object.values(mv.chars).filter((c) => !only || c.id === only);
+  ctx.fillStyle = '#1b2440';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  if (!chars.length) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 40px sans-serif';
+    ctx.fillText('assets/characters/characters.json: no characters loaded', W / 2, H / 2);
+    return;
+  }
+  const rows = chars.length * 2;
+  const cw = W / 8;
+  const chh = Math.min(260, H / rows);
+  const roles = Object.entries(mv.cast).flatMap(([role, v]) => (Array.isArray(v) ? v.map((c, i) => [`${role}[${i}]`, c]) : [[role, v]]));
+  chars.forEach((ch, ci) => {
+    STATES.forEach((state, si) => {
+      const x = (si % 8) * cw;
+      const y = (ci * 2 + Math.floor(si / 8)) * chh;
+      for (let gy = 0; gy < chh; gy += 20) {
+        for (let gx = 0; gx < cw; gx += 20) {
+          ctx.fillStyle = ((gx + gy) / 20) % 2 ? '#2a3554' : '#232d4a';
+          ctx.fillRect(x + gx, y + gy, Math.min(20, cw - gx), Math.min(20, chh - gy));
+        }
+      }
+      const s = Math.min(chh - 50, cw - 30) / 1.45 / ch.scale;
+      const { exact } = drawCharacter(ctx, ch, state, x + cw / 2, y + chh - 26 - s * 0.52, s);
+      const fallback = exact ? '' : ` → ${[...ch.poses.entries()].find(([, p]) => p === ch.pick(state).pose)[0]}`;
+      ctx.fillStyle = exact ? '#ffffff' : '#ffb3b3';
+      ctx.font = '700 18px sans-serif';
+      ctx.fillText(`${state}${fallback}`, x + cw / 2, y + chh - 22);
+      ctx.strokeStyle = '#3b4770';
+      ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, chh - 1);
+    });
+    const used = roles.filter(([, c]) => c === ch).map(([r]) => r);
+    ctx.fillStyle = '#ffe14d';
+    ctx.font = '700 20px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${ch.name} (${ch.id})  roles: ${used.join(', ') || '—'}`, 8, ci * 2 * chh + 6);
+    ctx.textAlign = 'center';
+  });
 }
 
 function fmt(s) {

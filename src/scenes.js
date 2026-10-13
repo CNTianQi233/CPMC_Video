@@ -9,6 +9,7 @@ import {
   vGradient, fillBg, radialBg, rays, hexGrid, stamp, poof,
 } from './gfx.js';
 import { drawMascot } from './mascot.js';
+import { drawCharacter, poseHeight } from './sprites.js';
 import {
   createDanmaku, volley, yinyang, magicCircle, frozenFrog, pencil,
   spellCutIn, spellBanner, stgFrame, stgBossHud, PLAYFIELD,
@@ -59,7 +60,7 @@ const COMMENTS = [
 
 const commas = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-export function createScenes({ feats, lyrics, meta, portrait = null }) {
+export function createScenes({ feats, lyrics, meta, cast = {} }) {
   const flake = makeSnowflake(128);
   const glowW = makeGlow(256);
   const glowC = makeGlow(256, '127,220,255');
@@ -76,39 +77,66 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
   const beatI = (t) => Math.floor(feats.beat(t));
   const P = feats.period;
 
+  // How the built-in mascot acts out each sprite state.
+  const MASCOT = {
+    normal: {},
+    happy: { mood: 'happy' },
+    smug: { mood: 'happy' },
+    angry: { mood: 'shock' },
+    shock: { mood: 'shock' },
+    dizzy: { mood: 'spiral', sweat: true },
+    sleepy: { mood: 'sleepy' },
+    think: { mood: 'normal', lookX: 1 },
+    point: { pointer: true },
+    wave: { mood: 'happy', wave: 1 },
+    cast: { mood: 'happy', wave: 1 },
+    jump: { mood: 'happy', wave: 1 },
+    shiver: { mood: 'sleepy' },
+    victory: { mood: 'happy', wave: 1 },
+    nervous: { mood: 'shock', sweat: true },
+    bow: { mood: 'happy' },
+  };
+  // Marks shown when a sprite sheet has no exact pose for a state.
+  const MARKS = { dizzy: '@', shock: '!!', angry: '#', sleepy: 'zzz', happy: '♪', think: '?', victory: '★', jump: '♪' };
+
+  /** Character for a role; the boss and the chorus partner default to the main star. */
+  const roleChar = (role) => cast[role] || (role === 'boss' || role === 'partner' ? cast.main : null) || null;
+
   /**
-   * The star of the show: the ice-cube teacher, or the illustration in
-   * assets/character.png when one is supplied (moods become small overlays).
+   * Draws a role (default 'main') in a state (one of STATES in sprites.js):
+   * the supplied character sprite when there is one, the ice-cube teacher
+   * otherwise. Feet land at y + 0.52·s either way.
    */
   function actor(ctx, x, y, s, t, o = {}) {
-    if (!portrait) return drawMascot(ctx, x, y, s, t, o);
-    const h = s * 1.35;
-    const w = (h * portrait.width) / portrait.height;
-    const sq = clamp(o.squash || 0);
-    ctx.save();
-    ctx.translate(x, y + s * 0.52);
-    ctx.rotate(o.tilt || 0);
-    ctx.scale(1 + sq * 0.05, 1 - sq * 0.05);
-    ctx.drawImage(portrait, -w / 2, -h, w, h);
-    ctx.restore();
-    const top = y + s * 0.52 - h;
-    const mood = o.mood || 'normal';
-    const mark = { spiral: '@', shock: '!!', sleepy: 'zzz', happy: '♪' }[mood];
+    const state = o.state || 'normal';
+    const ch = roleChar(o.role || 'main');
+    if (!ch) return drawMascot(ctx, x, y, s, t, { ...MASCOT[state], ...o });
+    const box = drawCharacter(ctx, ch, state, x, y, s, o);
+    const mark = !box.exact && MARKS[state];
     if (mark) {
-      outlined(ctx, mark, x + w * 0.32, top + s * 0.1 + Math.sin(t * 6) * 6, {
+      outlined(ctx, mark, x + box.w * 0.32, box.top + s * 0.1 + Math.sin(t * 6) * 6, {
         size: s * 0.22,
         family: FONT_DISPLAY,
         weight: 400,
-        fill: mood === 'shock' ? PAL.red : PAL.yellow,
+        fill: state === 'shock' || state === 'angry' ? PAL.red : PAL.yellow,
         outer: null,
       });
     }
-    if (o.sweat) {
+    if (o.sweat && !box.exact) {
       ctx.fillStyle = '#9fe3ff';
       ctx.beginPath();
-      ctx.ellipse(x - w * 0.3, top + s * 0.3 + ((t * 1.5) % 1) * s * 0.15, s * 0.04, s * 0.06, 0, 0, TAU);
+      ctx.ellipse(x - box.w * 0.3, box.top + s * 0.3 + ((t * 1.5) % 1) * s * 0.15, s * 0.04, s * 0.06, 0, 0, TAU);
       ctx.fill();
     }
+  }
+
+  /** Draws a role with its head top at `top` (for windows and peeking). */
+  function actorFromTop(ctx, role, state, x, top, s, t, o = {}) {
+    const ch = roleChar(role);
+    if (!ch) return false;
+    const h = poseHeight(ch, state, s);
+    drawCharacter(ctx, ch, state, x, top + h - s * 0.52, s, o);
+    return true;
   }
 
   // ------------------------------------------------------------- danmaku
@@ -416,7 +444,7 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
     const mx = lerp(2200, 1600, mk);
     const lt = t;
     actor(ctx, mx, 680 - Math.abs(Math.sin(feats.beat(t) * Math.PI)) * (t > 3.5 ? 24 : 0), 250, t, {
-      mood: lt > 6.8 && lt < 10.2 ? 'happy' : 'normal',
+      state: lt > 6.8 && lt < 10.2 ? 'smug' : 'point',
       pointer: true,
       squash: t > 3.5 ? pulse(t) : 0,
       lookX: -1,
@@ -663,7 +691,14 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
         [1670, 1],
       ]) {
         const hop = Math.abs(Math.sin(((b + ph) * Math.PI) / 2));
-        actor(ctx, x, 800 - hop * 120, 210, t, { mood: 'happy', squash: 1 - hop, wave: hop, tilt: (ph ? -1 : 1) * 0.1 });
+        actor(ctx, x, 800 - hop * 120, 210, t, {
+          role: ph ? 'partner' : 'main',
+          state: hop > 0.6 ? 'jump' : 'smug',
+          squash: 1 - hop,
+          wave: hop,
+          tilt: (ph ? -1 : 1) * 0.1,
+          flip: !!ph,
+        });
       }
     }
     if (v === 2) {
@@ -699,7 +734,7 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
     rays(ctx, boss.x, boss.y, 16, t * 0.3, '#ffffff', 0.08);
     snow(ctx, t * 1.6, { n: 50, alpha: 0.7, wind: 0 });
     magicCircle(ctx, boss.x, boss.y, 210 + p * 15, t * 0.9, '#ffffff', 0.6);
-    actor(ctx, boss.x, boss.y, 170, t, { mood: 'happy', squash: p, wave: 0.7 });
+    actor(ctx, boss.x, boss.y, 170, t, { role: 'boss', state: 'cast', squash: p, wave: 0.7 });
     dm.draw(ctx, DM.baka1, t, pf);
     pencil(ctx, pl.x, pl.y, 90, t);
     stgBossHud(ctx, t, sc.start, sc.end, boss.x);
@@ -762,6 +797,27 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
       ctx.rect(-60, -80, 60, 160);
       ctx.clip();
     }
+    const ch = cast.passengers?.[p.slot];
+    if (ch) {
+      const size = 120;
+      drawCharacter(ctx, ch, 'happy', 0, -44 + poseHeight(ch, 'happy', size) - size * 0.52, size);
+    } else drawPassenger(ctx, p);
+    ctx.restore();
+    if (p.half && kout <= 0) {
+      ctx.save();
+      ctx.globalAlpha *= kin;
+      ctx.setLineDash([8, 8]);
+      ctx.strokeStyle = 'rgba(12,31,79,0.6)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx, wy + 8);
+      ctx.lineTo(cx, wy + 80);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawPassenger(ctx, p) {
     ctx.fillStyle = p.color;
     ctx.strokeStyle = PAL.navy;
     ctx.lineWidth = 4;
@@ -783,19 +839,6 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
     ctx.arc(-8, -12, 3.5, 0, TAU);
     ctx.arc(8, -12, 3.5, 0, TAU);
     ctx.fill();
-    ctx.restore();
-    if (p.half && kout <= 0) {
-      ctx.save();
-      ctx.globalAlpha *= kin;
-      ctx.setLineDash([8, 8]);
-      ctx.strokeStyle = 'rgba(12,31,79,0.6)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx, wy + 8);
-      ctx.lineTo(cx, wy + 80);
-      ctx.stroke();
-      ctx.restore();
-    }
   }
 
   function bus(ctx, x, y, wheelA, t, withPax = true) {
@@ -1408,7 +1451,11 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
       star(ctx, mx + Math.cos(a) * ms * 0.95, my - ms * 0.1 + Math.sin(a) * ms * 0.7, 22 + pulse(t) * 10, 10);
       ctx.fill();
     }
-    actor(ctx, mx, my, ms, t, { mood: 'happy', squash: 1 - hop, wave: 0.6 + hop * 0.4 });
+    actor(ctx, mx, my, ms, t, {
+      state: side > 0.5 ? 'victory' : hop > 0.6 ? 'jump' : 'happy',
+      squash: 1 - hop,
+      wave: 0.6 + hop * 0.4,
+    });
     // curtains
     const open = v ? 1 : easeInOut(inv(0, 1.2, lt));
     for (const side2 of [-1, 1]) {
@@ -1665,19 +1712,20 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
     ctx.translate(-cx, -cy);
     clockFace(ctx, cx, cy, 280, t, tw, lt > 9 && lt < 11);
     ctx.restore();
-    // mascot: dizzy -> shocked -> shivering -> relaxed
-    let mood = 'normal';
-    if (lt >= 2.8 && lt < 9) mood = 'spiral';
-    else if (lt >= 9 && lt < 16) mood = 'shock';
-    else if (lt >= 16 && lt < 21) mood = 'sleepy';
-    else if (lt >= 21) mood = 'happy';
-    const shiver = lt >= 16 && lt < 21 ? Math.sin(t * 70) * 5 : 0;
+    // the teacher: dizzy -> shocked -> puzzled -> shivering -> relaxed
+    let state = 'normal';
+    if (lt >= 2.8 && lt < 9) state = 'dizzy';
+    else if (lt >= 9 && lt < 12.5) state = 'shock';
+    else if (lt >= 12.5 && lt < 16) state = 'think';
+    else if (lt >= 16 && lt < 21) state = 'shiver';
+    else if (lt >= 21) state = 'sleepy';
+    const shiver = state === 'shiver' ? Math.sin(t * 70) * 5 : 0;
     actor(ctx, 1460 + shiver, 610 - Math.abs(Math.sin(feats.beat(tw) * Math.PI)) * (lt < 16 ? 40 : 0), 300, t, {
-      mood,
+      state,
       sweat: lt >= 2.8 && lt < 16,
       squash: lt < 16 ? p : 0,
-      tilt: mood === 'spiral' ? Math.sin(t * 6) * 0.15 : 0,
-      lookX: lt < 2.8 ? -1 : 0,
+      tilt: state === 'dizzy' ? Math.sin(t * 6) * 0.15 : 0,
+      lookX: lt < 2.8 ? -1 : state === 'think' ? 1 : 0,
     });
     // two eyes, three hands
     const ek = inv(s0 + 5.2, s0 + 5.5, t) * (1 - inv(s0 + 8.8, s0 + 9.1, t));
@@ -1968,6 +2016,64 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
     ctx.stroke();
   }
 
+  /** The default prankster: a bunny peeking out with a smug face. */
+  function potBunny(ctx, ry, t) {
+    for (const s of [-1, 1]) {
+      ctx.save();
+      ctx.translate(1190 + s * 30, ry - 80);
+      ctx.rotate(s * 0.25 + Math.sin(t * 8 + s) * 0.08);
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = PAL.navy;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.ellipse(0, -60, 26, 80, 0, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffb3cf';
+      ctx.beginPath();
+      ctx.ellipse(0, -55, 12, 58, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = PAL.navy;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(1190, ry, 70, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = PAL.navy;
+    ctx.beginPath();
+    ctx.arc(1168, ry - 10, 7, 0, TAU);
+    ctx.arc(1212, ry - 10, 7, 0, TAU);
+    ctx.fill();
+  }
+
+  /** Optional cast in the pot scene: the shrine's owner and whoever pays. */
+  function potCast(ctx, t) {
+    const size = 230;
+    const feet = FLOOR - size * 0.52;
+    if (roleChar('shrine')) {
+      let state = 'smug';
+      if (t >= SHATTER - 0.6 && t < SHATTER + 2.8) state = 'shock';
+      else if (t >= 129 && t < 132) state = 'happy';
+      else if (t >= 132 && t < 135) state = 'angry';
+      else if (t >= 135 && t < 138) state = 'think';
+      else if (t >= 138 && t < 141) state = 'shock';
+      else if (t >= 141) state = 'dizzy';
+      actor(ctx, lerp(W + 200, 1450, easeOut(inv(121, 121.6, t))), feet, size, t, { role: 'shrine', state });
+    }
+    const k = easeOut(inv(127, 127.6, t));
+    if (k > 0 && roleChar('healer')) {
+      let state = 'point';
+      if (t >= 129 && t < 135) state = 'happy';
+      else if (t >= 135 && t < 138) state = 'think';
+      else if (t >= 138 && t < 141) state = 'shock';
+      else if (t >= 141) state = 'dizzy';
+      actor(ctx, lerp(-300, 230, k), feet, size, t, { role: 'healer', state });
+    }
+  }
+
   function potScene(ctx, t, lt) {
     shrineBg(ctx, t);
     // spotlight
@@ -2019,35 +2125,8 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
       ctx.rect(1160, 640, 400, 400);
       ctx.clip();
       const ry = lerp(820, 600, easeBack(rk));
-      for (const s of [-1, 1]) {
-        ctx.save();
-        ctx.translate(1190 + s * 30, ry - 80);
-        ctx.rotate(s * 0.25 + Math.sin(t * 8 + s) * 0.08);
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = PAL.navy;
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.ellipse(0, -60, 26, 80, 0, 0, TAU);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#ffb3cf';
-        ctx.beginPath();
-        ctx.ellipse(0, -55, 12, 58, 0, 0, TAU);
-        ctx.fill();
-        ctx.restore();
-      }
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = PAL.navy;
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(1190, ry, 70, 0, TAU);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = PAL.navy;
-      ctx.beginPath();
-      ctx.arc(1168, ry - 10, 7, 0, TAU);
-      ctx.arc(1212, ry - 10, 7, 0, TAU);
-      ctx.fill();
+      const peeked = actorFromTop(ctx, 'prankster', 'smug', 1190, ry - 170, 230, t, { tilt: Math.sin(t * 3) * 0.05 });
+      if (!peeked) potBunny(ctx, ry, t);
       ctx.restore();
       // whistling notes
       for (let i = 0; i < 3; i++) {
@@ -2055,6 +2134,7 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
         outlined(ctx, '♪', 1290 + age * 120, ry - 80 - age * 160, { size: 60, family: FONT_JP, fill: PAL.yellow, outer: null });
       }
     }
+    potCast(ctx, t);
     // the vase, its crack and the shatter
     const crack = inv(SHATTER - 0.6, SHATTER - 0.1, t);
     if (t < SHATTER) {
@@ -2472,7 +2552,9 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
         ctx.beginPath();
         ctx.rect(hole - 200, 0, 400, 760);
         ctx.clip();
-        bunny(ctx, hole, 760 + 60 - up * 190, t, b);
+        if (!actorFromTop(ctx, 'prankster', b % 2 ? 'smug' : 'happy', hole, 760 - 20 - up * 190, 200, t)) {
+          bunny(ctx, hole, 760 + 60 - up * 190, t, b);
+        }
         ctx.restore();
       }
       ctx.restore();
@@ -2603,7 +2685,7 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
       }
       const blink = Math.floor(t * 4) % 2;
       outlined(ctx, 'SERVER LOAD 999%', 960, 90, { size: 56, family: FONT_DISPLAY, weight: 400, fill: blink ? PAL.red : '#ffb3b3', outer: null });
-      actor(ctx, 1750, 790, 190, t, { mood: 'shock', sweat: true, squash: p, wave: 1 });
+      actor(ctx, 1750, 790, 190, t, { state: 'nervous', squash: p, wave: 1 });
       ctx.restore();
     }
     // the instrumental break: circular equaliser + loading bar
@@ -2958,7 +3040,11 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
       ctx.restore();
     }
     const b = feats.beat(Math.min(t, 270));
-    actor(ctx, 1580, 700 - Math.abs(Math.sin(b * Math.PI)) * 30, 260, t, { mood: 'happy', wave: 1, squash: t < 270 ? pulse(t) : 0 });
+    actor(ctx, 1580, 700 - Math.abs(Math.sin(b * Math.PI)) * 30, 260, t, {
+      state: t < 275.5 ? 'wave' : 'bow',
+      wave: 1,
+      squash: t < 270 ? pulse(t) : 0,
+    });
     frozenFrog(ctx, 1330, 752, 96, t, 1);
     snow(ctx, t, { n: 40, alpha: 0.6 });
     const fade = inv(276.0, 278.4, t);
@@ -3029,7 +3115,7 @@ export function createScenes({ feats, lyrics, meta, portrait = null }) {
       for (const sp of SPELLS) {
         if (t < sp.t0 || t > sp.t1) continue;
         if (sp.cutIn) {
-          const drawStar = (x, y, size) => actor(ctx, x, y, size, t, { mood: 'happy', wave: 1 });
+          const drawStar = (x, y, size) => actor(ctx, x, y, size, t, { role: sp.stg ? 'boss' : 'main', state: 'cast' });
           ctx.save();
           if (sp.stg) {
             ctx.beginPath();

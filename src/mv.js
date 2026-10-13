@@ -4,6 +4,7 @@ import { parseLRC } from './lrc.js';
 import { loadFeatures } from './features.js';
 import { createLyrics } from './lyrics.js';
 import { createScenes } from './scenes.js';
+import { loadCast } from './sprites.js';
 import { W, H, FONT_JP, FONT_CN, FONT_DISPLAY } from './gfx.js';
 
 export { W, H };
@@ -13,21 +14,11 @@ export async function loadMV({ base = './assets/', lyricOffset = 0 } = {}) {
     fetch(base + 'lyrics.lrc').then((r) => r.text()),
     fetch(base + 'analysis.json').then((r) => r.json()),
   ]);
-  const portrait = await loadImage(base + 'character.png');
-  const mv = createMV(lrcText, analysis, { lyricOffset, portrait });
+  const { chars, cast } = await loadCast(base);
+  const mv = createMV(lrcText, analysis, { lyricOffset, cast });
+  mv.chars = chars;
   await loadFonts(mv);
   return mv;
-}
-
-/** Optional user-supplied illustration; resolves to null when absent. */
-function loadImage(url) {
-  if (typeof Image === 'undefined') return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img.naturalWidth ? img : null);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
 }
 
 async function loadFonts(mv) {
@@ -42,11 +33,11 @@ async function loadFonts(mv) {
   ]).catch(() => {});
 }
 
-export function createMV(lrcText, analysis, { lyricOffset = 0, portrait = null } = {}) {
+export function createMV(lrcText, analysis, { lyricOffset = 0, cast = {} } = {}) {
   const { meta, lines } = parseLRC(lrcText);
   const feats = loadFeatures(analysis);
   const lyrics = createLyrics(lines, feats);
-  const scenes = createScenes({ feats, lyrics, meta, portrait });
+  const scenes = createScenes({ feats, lyrics, meta, cast });
 
   function render(ctx, t) {
     const sc = scenes.at(t);
@@ -72,5 +63,5 @@ export function createMV(lrcText, analysis, { lyricOffset = 0, portrait = null }
     ctx.restore();
   }
 
-  return { meta, lines, feats, duration: feats.duration, render, scenes };
+  return { meta, lines, feats, cast, duration: feats.duration, render, scenes };
 }

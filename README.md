@@ -21,11 +21,42 @@
   摔壶的段落发生在有鸟居、注连绳和赛钱箱的神社
 - **小道具**：阴阳玉、冻在冰块里的青蛙；片头和片尾标注「東方Project 二次創作」
 
-## 使用自己的立绘
+## 角色差分图
 
-把一张透明背景的 PNG 放到 `assets/character.png`，冰块老师出场的所有位置（教室、舞台、
-闹钟、STG 的 Boss、符卡 cut-in、片尾）都会自动换成这张图，表情会以 ♪ / !! / @ / zzz 等符号显示。
-没有这个文件时使用冰块老师。请使用你自己画的或有权使用的图。
+角色可以换成你自己的图，并按剧情切换表情和动作。把图片和 `characters.json` 放在
+`assets/characters/` 下（参考 `assets/characters/characters.example.json`）。这个目录被 git 忽略，
+请使用你自己画的或有权使用的图。
+
+**一张拼图切出全部差分**：`sheets` 里写图片、网格 `grid: [列, 行]` 和每格的状态名 `cells`
+（从左到右、从上到下，空格子写 `null`）。也可以用 `files: { "状态名": "单张.png" }` 单独补图，
+会覆盖拼图里的同名差分。
+
+- **抠背景**：默认 `"key": "auto"`，从四个角取纯色背景并抠掉；也可以写死颜色（如 `"#ff00ff"`），
+  透明 PNG 写 `"none"`。容差用 `keyTolerance` / `keySoftness` 调。
+- **裁边对齐**：每格自动裁到角色本身，伸进格子的邻居碎块和远处杂点会被丢掉；所有差分按脚底对齐，
+  以 `normal` 的高度为基准统一缩放。角色之间身高不同用 `scale` 调，朝向反了用 `"flip": true`。
+- **缺的差分**会退回到最接近的一张，并在头顶显示 ♪ / !! / @ / zzz 等符号。
+
+**状态（16 种，默认 4×4 拼图就是这个顺序）**：
+`normal` `happy` `smug` `angry` / `shock` `dizzy` `sleepy` `think` /
+`point` `wave` `cast` `jump` / `shiver` `victory` `nervous` `bow`
+
+**角色位（`cast`）和各自用到的差分**：
+
+| 角色位 | 出场位置 | 用到的状态 |
+| --- | --- | --- |
+| `main` | 教室、副歌左侧、舞台、闹钟、服务器、符卡 cut-in、片尾 | 除 `angry` 外全部 15 种 |
+| `boss` | STG 的 Boss 和它的 cut-in（默认同 `main`） | `cast` |
+| `partner` | 最终副歌右侧（默认同 `main`） | `jump` `smug` |
+| `shrine` | 神社：壶的主人 | `smug` `shock` `happy` `angry` `think` `dizzy` |
+| `healer` | 神社：来赔钱的人 | `point` `happy` `think` `shock` `dizzy` |
+| `prankster` | 神社台座后偷看、打地鼠 | `smug` `happy` |
+| `passengers` | 巴士四个窗口（数组，`null` 保留默认乘客；第 4 个是"半个人"） | `happy` |
+
+没写的角色位保持内置的冰块老师或默认图形。旧版的单张 `assets/character.png` 仍然有效（当作 `main` 的 `normal`）。
+
+**检查切图**：打开 `http://localhost:8080/?sprites`（或 `?sprites=角色id`），会列出每个角色的 16 种状态，
+红字表示退回到了哪张。
 
 ## 准备素材
 
@@ -76,12 +107,13 @@ node tools/render.mjs --stills 30,90,150                 # 导出 PNG 静帧到 
 | `src/lrc.js` | LRC 解析（自动识别"原文 + 翻译"成对格式、合并同时间戳行） |
 | `src/mascot.js` | 原创吉祥物「キューブ先生」 |
 | `src/touhou.js` | 东方元素：弹幕系统、符卡 cut-in 与符卡名、STG 面板、魔法阵、阴阳玉、冻青蛙 |
+| `src/sprites.js` | 角色差分：读 `characters.json`、抠背景、切格裁边、脚底对齐、差分退回 |
 | `src/gfx.js` | 绘图工具（描边文字、⑨ 徽章、雪花、光晕、印章……） |
 | `src/features.js` | 读取预计算的音频特征（节拍、低频、频谱） |
 | `tools/render.mjs` | 用无头 Chromium 逐帧截取画面，送入 ffmpeg 合成视频 |
 | `tools/analyze_audio.py` | 生成 `assets/analysis.json`（BPM / 节拍相位 / 能量包络 / 频谱，需要 numpy） |
 | `tools/build_fonts.py` | 从 Google Fonts 下载字体并按用到的字符子集化（需要 fonttools、brotli） |
-| `assets/` | 歌曲、歌词、音频特征、子集化字体、可选的 `character.png` |
+| `assets/` | 歌曲、歌词、音频特征、子集化字体；`characters/` 放你自己的角色差分 |
 
 ## 分镜
 
