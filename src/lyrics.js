@@ -156,11 +156,11 @@ export function createLyrics(lines, feats) {
     ctx.restore();
   }
 
-  function drawBig(ctx, line, t, rap) {
+  function drawBig(ctx, line, t, rap, cx = W / 2, maxW = 1760) {
     const lt = t - line.start;
     const dur = line.end - line.start;
     const out = inv(line.end - 0.12, line.end, t);
-    const l = fit(ctx, line.text, rap ? 170 : 190, FONT_JP, 900, 1760);
+    const l = fit(ctx, line.text, rap ? 170 : 190, FONT_JP, 900, maxW);
     const n = l.chars.length;
     const stagger = rap ? Math.min(0.06, (dur * 0.45) / n) : 0.035;
     const beat = feats.beat(t);
@@ -175,7 +175,7 @@ export function createLyrics(lines, feats) {
     drawChars(
       ctx,
       l,
-      W / 2 + sx,
+      cx + sx,
       cy + sy,
       (i) => {
         const k = clamp((lt - i * stagger) / (rap ? 0.12 : 0.24));
@@ -187,7 +187,7 @@ export function createLyrics(lines, feats) {
       },
       { wipe, shadow: rap ? 'rgba(255,60,140,0.85)' : 'rgba(12,31,79,0.55)', hiTop: '#ffffff', hiBottom: '#7ff3ff' },
     );
-    drawTrans(ctx, line, t, W / 2, cy + l.size * 0.5 + 72, 62, 1700, clamp((lt - 0.1) / 0.25));
+    drawTrans(ctx, line, t, cx, cy + l.size * 0.5 + 72, 62, maxW - 60, clamp((lt - 0.1) / 0.25));
     ctx.restore();
   }
 
@@ -250,7 +250,7 @@ export function createLyrics(lines, feats) {
     lineAt,
     tokenTimes,
     /** mode: 'bottom' | 'big' | 'rap' | 'none'; tokens: allow the digit count-out */
-    draw(ctx, t, mode, { tokens = true } = {}) {
+    draw(ctx, t, mode, { tokens = true, cx, maxW } = {}) {
       if (mode === 'none') return;
       const line = lineAt(t);
       if (mode === 'bottom') {
@@ -260,7 +260,7 @@ export function createLyrics(lines, feats) {
       }
       if (!line) return;
       if (tokens && isTokens(line.text)) return drawTokens(ctx, line, t);
-      if (mode === 'big' || mode === 'rap') return drawBig(ctx, line, t, mode === 'rap');
+      if (mode === 'big' || mode === 'rap') return drawBig(ctx, line, t, mode === 'rap', cx, maxW);
       drawBottom(ctx, line, t);
     },
   };

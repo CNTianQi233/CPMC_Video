@@ -13,9 +13,21 @@ export async function loadMV({ base = './assets/', lyricOffset = 0 } = {}) {
     fetch(base + 'lyrics.lrc').then((r) => r.text()),
     fetch(base + 'analysis.json').then((r) => r.json()),
   ]);
-  const mv = createMV(lrcText, analysis, { lyricOffset });
+  const portrait = await loadImage(base + 'character.png');
+  const mv = createMV(lrcText, analysis, { lyricOffset, portrait });
   await loadFonts(mv);
   return mv;
+}
+
+/** Optional user-supplied illustration; resolves to null when absent. */
+function loadImage(url) {
+  if (typeof Image === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth ? img : null);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
 }
 
 async function loadFonts(mv) {
@@ -30,11 +42,11 @@ async function loadFonts(mv) {
   ]).catch(() => {});
 }
 
-export function createMV(lrcText, analysis, { lyricOffset = 0 } = {}) {
+export function createMV(lrcText, analysis, { lyricOffset = 0, portrait = null } = {}) {
   const { meta, lines } = parseLRC(lrcText);
   const feats = loadFeatures(analysis);
   const lyrics = createLyrics(lines, feats);
-  const scenes = createScenes({ feats, lyrics, meta });
+  const scenes = createScenes({ feats, lyrics, meta, portrait });
 
   function render(ctx, t) {
     const sc = scenes.at(t);
@@ -42,7 +54,7 @@ export function createMV(lrcText, analysis, { lyricOffset = 0 } = {}) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    const cam = sc.camera && sc.camera(t);
+    const cam = sc.camera && sc.camera(t, sc);
     if (cam) {
       ctx.translate(W / 2 + (cam.x || 0), H / 2 + (cam.y || 0));
       if (cam.r) ctx.rotate(cam.r);
@@ -53,8 +65,9 @@ export function createMV(lrcText, analysis, { lyricOffset = 0 } = {}) {
     ctx.restore();
 
     ctx.save();
+    scenes.spells(ctx, t);
     scenes.finish(ctx);
-    lyrics.draw(ctx, t + lyricOffset, sc.lyrics, { tokens: sc.tokens });
+    lyrics.draw(ctx, t + lyricOffset, sc.lyrics, { tokens: sc.tokens, cx: sc.lyricCx, maxW: sc.lyricMaxW });
     scenes.overlay(ctx, t, sc);
     ctx.restore();
   }

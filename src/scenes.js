@@ -9,6 +9,10 @@ import {
   vGradient, fillBg, radialBg, rays, hexGrid, stamp, poof,
 } from './gfx.js';
 import { drawMascot } from './mascot.js';
+import {
+  createDanmaku, volley, yinyang, magicCircle, frozenFrog, pencil,
+  spellCutIn, spellBanner, stgFrame, stgBossHud, PLAYFIELD,
+} from './touhou.js';
 
 // [name, start, end, options]. Boundaries follow the LRC timestamps.
 const TIMELINE = [
@@ -33,6 +37,21 @@ const TIMELINE = [
 
 const LYRIC_MODE = { baka: 'big', rap: 'rap' };
 
+// Every section is fought as an (original) spell card, Touhou style.
+const SPELLS = [
+  { t0: 23, t1: 45, name: '氷符「パーフェクト九九」', cutIn: true },
+  { t0: 45, t1: 64.3, name: '乗算「ゼロ人バス」' },
+  { t0: 77, t1: 100, name: '時符「三本針ラビリンス」' },
+  { t0: 100, t1: 121, name: '算符「無限九九地獄」', cutIn: true, stg: true },
+  { t0: 121, t1: 143, name: '割符「プライスレス・ツボ」' },
+  { t0: 143, t1: 154, name: '数符「ゴールデン・ナイン」' },
+  { t0: 187, t1: 207.8, name: '凍脳「アブソリュート・ジーニアス」', cutIn: true },
+  { t0: 248, t1: 269, name: '最終算「パーフェクトナイン」', cutIn: true },
+];
+
+const STOP_NAMES = ['紅魔館前', '白玉楼前', '八雲邸前'];
+const FANWORK = '東方Project 二次創作';
+
 const COMMENTS = [
   'wwwww', 'www', '草', '8888888', '天才!?', 'かわいい', '？？？', 'wwwwwwwww',
   '算数とは…', 'ｗ', '9', '天才あらわる', 'ここすき', '9999', '←わかる', 'えぇ…',
@@ -40,7 +59,7 @@ const COMMENTS = [
 
 const commas = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-export function createScenes({ feats, lyrics, meta }) {
+export function createScenes({ feats, lyrics, meta, portrait = null }) {
   const flake = makeSnowflake(128);
   const glowW = makeGlow(256);
   const glowC = makeGlow(256, '127,220,255');
@@ -56,6 +75,117 @@ export function createScenes({ feats, lyrics, meta }) {
   };
   const beatI = (t) => Math.floor(feats.beat(t));
   const P = feats.period;
+
+  /**
+   * The star of the show: the ice-cube teacher, or the illustration in
+   * assets/character.png when one is supplied (moods become small overlays).
+   */
+  function actor(ctx, x, y, s, t, o = {}) {
+    if (!portrait) return drawMascot(ctx, x, y, s, t, o);
+    const h = s * 1.35;
+    const w = (h * portrait.width) / portrait.height;
+    const sq = clamp(o.squash || 0);
+    ctx.save();
+    ctx.translate(x, y + s * 0.52);
+    ctx.rotate(o.tilt || 0);
+    ctx.scale(1 + sq * 0.05, 1 - sq * 0.05);
+    ctx.drawImage(portrait, -w / 2, -h, w, h);
+    ctx.restore();
+    const top = y + s * 0.52 - h;
+    const mood = o.mood || 'normal';
+    const mark = { spiral: '@', shock: '!!', sleepy: 'zzz', happy: '♪' }[mood];
+    if (mark) {
+      outlined(ctx, mark, x + w * 0.32, top + s * 0.1 + Math.sin(t * 6) * 6, {
+        size: s * 0.22,
+        family: FONT_DISPLAY,
+        weight: 400,
+        fill: mood === 'shock' ? PAL.red : PAL.yellow,
+        outer: null,
+      });
+    }
+    if (o.sweat) {
+      ctx.fillStyle = '#9fe3ff';
+      ctx.beginPath();
+      ctx.ellipse(x - w * 0.3, top + s * 0.3 + ((t * 1.5) % 1) * s * 0.15, s * 0.04, s * 0.06, 0, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // ------------------------------------------------------------- danmaku
+
+  const dm = createDanmaku();
+  const byT = (a, b) => a.t - b.t;
+  /** beat times in [from, to), every `step` beats, shifted by `phase` beats */
+  const beatTimes = (from, to, step = 1, phase = 0) => {
+    const out = [];
+    let k = Math.floor((from - feats.offset) / (step * P)) - 1;
+    for (;; k++) {
+      const tt = feats.offset + (k * step + phase) * P;
+      if (tt >= to) break;
+      if (tt >= from) out.push({ tt, i: k });
+    }
+    return out;
+  };
+  const CYCLE = ['cyan', 'blue', 'purple', 'pink'];
+  const bossPos = (t) => ({ x: PLAYFIELD.x + PLAYFIELD.w / 2 + Math.sin(t * 0.8) * 140, y: 240 + Math.sin(t * 1.6) * 20 });
+  const playerPos = (t) => ({ x: PLAYFIELD.x + PLAYFIELD.w / 2 + Math.sin(t * 1.3) * 300 + Math.sin(t * 3.1) * 50, y: 930 });
+
+  const DM = {
+    sparkle: beatTimes(11.3, 22.8, 0.5).map(({ tt, i }) =>
+      volley(tt, 80 + rand(i, 301) * 1760, -20, 1, {
+        a0: Math.PI / 2 + (rand(i, 302) - 0.5) * 0.4,
+        spread: 0,
+        v: 240 + rand(i, 303) * 200,
+        type: 'star',
+        color: ['yellow', 'cyan', 'pink', 'white'][i & 3],
+        size: 13 + rand(i, 304) * 8,
+      }),
+    ),
+    baka0: [
+      ...beatTimes(23.2, 44.3).map(({ tt, i }) => volley(tt, 960, 450, 20, { a0: i * 0.13, v: 380, color: CYCLE[i & 3], size: 15 })),
+      ...beatTimes(23.2, 44.3, 2, 1).map(({ tt, i }) =>
+        volley(tt, 960, 450, 12, { a0: -i * 0.21, v: 300, spin: i % 2 ? 0.45 : -0.45, type: 'rice', color: 'yellow', size: 15 }),
+      ),
+    ].sort(byT),
+    baka1: [
+      ...beatTimes(101, 120.5, 0.25).flatMap(({ tt, i }) => {
+        const b = bossPos(tt);
+        return [
+          volley(tt, b.x, b.y, 5, { a0: i * 0.33, v: 330, type: 'rice', color: 'cyan', size: 14 }),
+          volley(tt, b.x, b.y, 5, { a0: -i * 0.33 + 0.3, v: 330, type: 'rice', color: 'pink', size: 14 }),
+        ];
+      }),
+      ...beatTimes(101, 120.5, 2).map(({ tt, i }) => {
+        const b = bossPos(tt);
+        return volley(tt, b.x, b.y, 30, { a0: i * 0.1, v: 220, color: 'red', size: 13 });
+      }),
+      ...beatTimes(110, 120.5, 4, 1).map(({ tt }) => {
+        const b = bossPos(tt);
+        const pl = playerPos(tt);
+        return volley(tt, b.x, b.y, 7, { a0: Math.atan2(pl.y - b.y, pl.x - b.x), spread: 0.9, v: 520, type: 'amulet', color: 'red', size: 17 });
+      }),
+    ].sort(byT),
+    baka2: [
+      ...beatTimes(248.3, 268.6).map(({ tt, i }) => volley(tt, 960, 450, 28, { a0: i * 0.11, v: 400, color: CYCLE[i & 3], size: 15 })),
+      ...beatTimes(248.3, 268.6, 0.5).flatMap(({ tt, i }) => [
+        volley(tt, 960, 450, 6, { a0: i * 0.25, v: 340, type: 'star', color: 'yellow', size: 14 }),
+        volley(tt, 960, 450, 6, { a0: -i * 0.25, v: 340, type: 'star', color: 'green', size: 14 }),
+      ]),
+      ...beatTimes(248.3, 268.6, 4, 2).map(({ tt, i }) => volley(tt, 960, 450, 36, { a0: i * 0.05, v: 260, type: 'amulet', color: 'purple', size: 16 })),
+    ].sort(byT),
+    rap: [
+      ...beatTimes(187.3, 208.8, 0.5).map(({ tt, i }) =>
+        volley(tt, 960, 470, 6, { a0: i * 0.29, v: 360, type: 'rice', color: i % 2 ? 'blue' : 'cyan', size: 15 }),
+      ),
+      ...beatTimes(187.3, 208.8, 4).map(({ tt, i }) => volley(tt, 960, 470, 16, { a0: i * 0.2, v: 220, color: 'pink', size: 26 })),
+    ].sort(byT),
+    number: beatTimes(209.1, 214.8).map(({ tt, i }) =>
+      volley(tt, 960, 470, 18, { a0: i * 0.17, v: 520, type: 'star', color: i % 2 ? 'yellow' : 'red', size: 17 }),
+    ),
+    stage1: beatTimes(215.3, 222.4, 2).map(({ tt, i }) =>
+      volley(tt, 960, 560, 16, { a0: i * 0.2, v: 300, type: 'star', color: CYCLE[i & 3], size: 15 }),
+    ),
+  };
 
   // ---------------------------------------------------------------- shared
 
@@ -247,6 +377,10 @@ export function createScenes({ feats, lyrics, meta }) {
       chalk(ctx, sub, 960, 360, fitFont(ctx, sub, 40, FONT_JP, 700, 1200), { color: 'rgba(200,240,255,0.95)' });
       ctx.restore();
     }
+    ctx.save();
+    ctx.globalAlpha = inv(3.0, 3.6, t);
+    chalk(ctx, FANWORK, 960, 412, 30, { color: 'rgba(255,190,215,0.95)' });
+    ctx.restore();
     // chalk equations, every answer is (confidently) nine
     EQUATIONS.forEach(([lhs, ans], i) => {
       const t0 = feats.snap(3.6 + i * 2.2);
@@ -281,12 +415,13 @@ export function createScenes({ feats, lyrics, meta }) {
     const mk = easeBack(inv(2.7, 3.5, t));
     const mx = lerp(2200, 1600, mk);
     const lt = t;
-    drawMascot(ctx, mx, 680 - Math.abs(Math.sin(feats.beat(t) * Math.PI)) * (t > 3.5 ? 24 : 0), 250, t, {
+    actor(ctx, mx, 680 - Math.abs(Math.sin(feats.beat(t) * Math.PI)) * (t > 3.5 ? 24 : 0), 250, t, {
       mood: lt > 6.8 && lt < 10.2 ? 'happy' : 'normal',
       pointer: true,
       squash: t > 3.5 ? pulse(t) : 0,
       lookX: -1,
     });
+    frozenFrog(ctx, 1330, 748, 96, t);
     dust(ctx, t);
     // fade in from black
     const fade = 1 - inv(0, 0.9, t);
@@ -418,6 +553,7 @@ export function createScenes({ feats, lyrics, meta }) {
     radialBg(ctx, 960, 420, 1300, '#3b3a9e', '#0a1040');
     rays(ctx, 960, 420, 18, t * 0.15, '#ffffff', 0.05);
     twinkles(ctx, t, 60, 61, { size: 14 });
+    dm.draw(ctx, DM.sparkle, t);
     const p = pulse(t);
     drawSprite(ctx, glowC, 960, 420, 900 + p * 120, 0, 0.55);
     // 0..6: diamond, 6..9.2: medal, 9.2..: podium
@@ -484,42 +620,14 @@ export function createScenes({ feats, lyrics, meta }) {
 
   function baka(ctx, t, lt, sc) {
     const v = sc.variant;
+    if (v === 1) return bakaSTG(ctx, t, lt, sc);
     const b = feats.beat(t);
     const bi = Math.floor(b);
     const p = pulse(t);
     const pal = BAKA_PAL[Math.floor(bi / (v === 2 ? 1 : 2)) % 4];
     radialBg(ctx, 960, 450, 1250, pal[0], pal[1]);
-    rays(ctx, 960, 450, 20, t * 0.4 * (v === 1 ? -1 : 1), '#ffffff', 0.13);
-    if (v === 1) {
-      // checkerboard floor in perspective
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 700, W, H - 700);
-      ctx.clip();
-      const scroll = fract(b * 0.5);
-      for (let row = 0; row < 10; row++) {
-        const z0 = 1 + row - scroll;
-        const z1 = z0 + 1;
-        const ya = 700 + 2600 / (z1 + 2.2) - 2600 / 12;
-        const yb = 700 + 2600 / (z0 + 2.2) - 2600 / 12;
-        for (let col = -12; col < 12; col++) {
-          if ((col + row) % 2 === 0) continue;
-          const xa0 = 960 + (col * 260) / (z1 + 2.2) * 3;
-          const xa1 = 960 + ((col + 1) * 260) / (z1 + 2.2) * 3;
-          const xb0 = 960 + (col * 260) / (z0 + 2.2) * 3;
-          const xb1 = 960 + ((col + 1) * 260) / (z0 + 2.2) * 3;
-          ctx.fillStyle = 'rgba(255,255,255,0.22)';
-          ctx.beginPath();
-          ctx.moveTo(xa0, ya);
-          ctx.lineTo(xa1, ya);
-          ctx.lineTo(xb1, yb);
-          ctx.lineTo(xb0, yb);
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
-      ctx.restore();
-    }
+    rays(ctx, 960, 450, 20, t * 0.4, '#ffffff', 0.13);
+    magicCircle(ctx, 960, 450, 330 + p * 20, t * 0.7, '#ffffff', 0.35);
     // pulse rings
     ctx.lineWidth = 14;
     for (let k = 0; k < 3; k++) {
@@ -529,26 +637,33 @@ export function createScenes({ feats, lyrics, meta }) {
       ctx.arc(960, 450, ph * 1500, 0, TAU);
       ctx.stroke();
     }
-    // orbiting nines
+    dm.draw(ctx, v === 2 ? DM.baka2 : DM.baka0, t);
+    // orbiting nines and yin-yang orbs
     const n = 12;
     for (let i = 0; i < n; i++) {
-      const a = t * 0.6 * (v === 1 ? -1 : 1) + (i * TAU) / n;
+      const a = t * 0.6 + (i * TAU) / n;
       const depth = (Math.sin(a) + 1) / 2;
       const r = 36 + depth * 44 + p * 10;
-      nine(ctx, 960 + Math.cos(a) * 780, 450 + Math.sin(a) * 330, r, {
+      const x = 960 + Math.cos(a) * 780;
+      const y = 450 + Math.sin(a) * 330;
+      if (i % 2) {
+        yinyang(ctx, x, y, r * 0.9, t * 4 + i);
+        continue;
+      }
+      nine(ctx, x, y, r, {
         rot: Math.sin(t * 3 + i) * 0.5,
-        bg: i % 2 ? '#ffffff' : PAL.yellow,
+        bg: i % 4 ? '#ffffff' : PAL.yellow,
         ring: i % 3 ? PAL.blue : PAL.pink,
         color: i % 3 ? PAL.blue : PAL.pink,
       });
     }
-    if (v >= 1) {
+    if (v === 2) {
       for (const [x, ph] of [
         [250, 0],
         [1670, 1],
       ]) {
         const hop = Math.abs(Math.sin(((b + ph) * Math.PI) / 2));
-        drawMascot(ctx, x, 800 - hop * 120, 210, t, { mood: 'happy', squash: 1 - hop, wave: hop, tilt: (ph ? -1 : 1) * 0.1 });
+        actor(ctx, x, 800 - hop * 120, 210, t, { mood: 'happy', squash: 1 - hop, wave: hop, tilt: (ph ? -1 : 1) * 0.1 });
       }
     }
     if (v === 2) {
@@ -567,6 +682,31 @@ export function createScenes({ feats, lyrics, meta }) {
     // beat flash
     ctx.fillStyle = `rgba(255,255,255,${0.18 * p})`;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  /** The second chorus played as a vertical shooter: boss, bullets, score panel. */
+  function bakaSTG(ctx, t, lt, sc) {
+    const pf = PLAYFIELD;
+    const p = pulse(t);
+    const boss = bossPos(t);
+    const pl = playerPos(t);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pf.x, pf.y, pf.w, pf.h);
+    ctx.clip();
+    fillBg(ctx, ['#123f9e', '#2a74d4', '#79c9f7']);
+    hexGrid(ctx, 70, 0, t * 140, 'rgba(255,255,255,0.16)', 2);
+    rays(ctx, boss.x, boss.y, 16, t * 0.3, '#ffffff', 0.08);
+    snow(ctx, t * 1.6, { n: 50, alpha: 0.7, wind: 0 });
+    magicCircle(ctx, boss.x, boss.y, 210 + p * 15, t * 0.9, '#ffffff', 0.6);
+    actor(ctx, boss.x, boss.y, 170, t, { mood: 'happy', squash: p, wave: 0.7 });
+    dm.draw(ctx, DM.baka1, t, pf);
+    pencil(ctx, pl.x, pl.y, 90, t);
+    stgBossHud(ctx, t, sc.start, sc.end, boss.x);
+    ctx.fillStyle = `rgba(255,255,255,${0.12 * p})`;
+    ctx.fillRect(pf.x, pf.y, pf.w, pf.h);
+    ctx.restore();
+    stgFrame(ctx, t, sc.start, feats.beat(t) - feats.beat(sc.start), { power: lt > 10 ? 'MAX' : (1 + lt * 0.3).toFixed(2) });
   }
 
   // -------------------------------------------------------------------- bus
@@ -678,6 +818,11 @@ export function createScenes({ feats, lyrics, meta }) {
     ctx.stroke();
     ctx.fillStyle = '#2f6ee0';
     ctx.fillRect(x - 276, y - 120, 552, 24);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 19px ${FONT_JP}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('幻想郷交通  ⑨系統', x - 250, y - 107);
     // windows + passengers
     for (let i = 0; i < 4; i++) {
       const wx = x - 252 + i * 112;
@@ -762,6 +907,216 @@ export function createScenes({ feats, lyrics, meta }) {
     ctx.restore();
   }
 
+  // A red western mansion with a clock tower by a misty lake.
+  function mansion(ctx, x, t) {
+    const base = 600;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = '#9fd3f0';
+    ctx.beginPath();
+    ctx.ellipse(x - 560, base - 4, 300, 30, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      ctx.moveTo(x - 700 + i * 70 + Math.sin(t + i) * 10, base - 10 + (i % 2) * 10);
+      ctx.lineTo(x - 650 + i * 70 + Math.sin(t + i) * 10, base - 10 + (i % 2) * 10);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = '#3a0d1a';
+    ctx.lineWidth = 4;
+    const block = (bx, by, bw, bh, roofH) => {
+      ctx.fillStyle = '#c0313f';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillStyle = '#4a1730';
+      ctx.beginPath();
+      ctx.moveTo(bx - 14, by);
+      ctx.lineTo(bx + 30, by - roofH);
+      ctx.lineTo(bx + bw - 30, by - roofH);
+      ctx.lineTo(bx + bw + 14, by);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      for (let r = 0; r < Math.floor((bh - 30) / 52); r++) {
+        for (let c = 0; c < Math.floor((bw - 20) / 44); c++) {
+          ctx.fillStyle = (r + c) % 3 ? '#5a1020' : '#ffd6a0';
+          ctx.beginPath();
+          ctx.roundRect(bx + 18 + c * 44, by + 18 + r * 52, 22, 32, [11, 11, 2, 2]);
+          ctx.fill();
+        }
+      }
+    };
+    block(x - 330, base - 170, 220, 170, 40);
+    block(x + 110, base - 170, 220, 170, 40);
+    block(x - 120, base - 240, 240, 240, 50);
+    // clock tower
+    ctx.fillStyle = '#a82a38';
+    ctx.fillRect(x - 46, base - 380, 92, 100);
+    ctx.strokeRect(x - 46, base - 380, 92, 100);
+    ctx.fillStyle = '#4a1730';
+    ctx.beginPath();
+    ctx.moveTo(x - 58, base - 380);
+    ctx.lineTo(x, base - 450);
+    ctx.lineTo(x + 58, base - 380);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(x, base - 330, 30, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, base - 330);
+    ctx.lineTo(x + Math.cos(t * 2) * 22, base - 330 + Math.sin(t * 2) * 22);
+    ctx.moveTo(x, base - 330);
+    ctx.lineTo(x + Math.cos(t * 0.3) * 14, base - 330 + Math.sin(t * 0.3) * 14);
+    ctx.stroke();
+    ctx.fillStyle = '#2a0812';
+    ctx.beginPath();
+    ctx.roundRect(x - 34, base - 90, 68, 90, [34, 34, 0, 0]);
+    ctx.fill();
+    // mist rolling off the lake
+    for (let i = 0; i < 7; i++) {
+      drawSprite(ctx, glowW, x - 700 + i * 200 + Math.sin(t * 0.5 + i) * 40, base - 10, 340, 0, 0.55);
+    }
+    ctx.restore();
+  }
+
+  // A gate at the top of long stairs, cherry trees and floating spirits.
+  function gateOfSpirits(ctx, x, t) {
+    const base = 600;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    for (const tx of [x - 330, x + 330]) {
+      ctx.fillStyle = '#6b4a3a';
+      ctx.fillRect(tx - 14, base - 150, 28, 150);
+      for (let i = 0; i < 16; i++) {
+        const a = rand(i, 321) * TAU;
+        const d = rand(i, 322) * 110;
+        ctx.fillStyle = i % 3 ? '#ffc1d9' : '#ff9cc4';
+        ctx.beginPath();
+        ctx.arc(tx + Math.cos(a) * d, base - 200 + Math.sin(a) * d * 0.6, 50 + rand(i, 323) * 30, 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.fillStyle = '#d4d7e2';
+    ctx.strokeStyle = '#6a7090';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - 130, base);
+    ctx.lineTo(x + 130, base);
+    ctx.lineTo(x + 66, base - 140);
+    ctx.lineTo(x - 66, base - 140);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    for (let i = 1; i < 9; i++) {
+      const k = i / 9;
+      ctx.moveTo(lerp(x - 130, x - 66, k), base - 140 * k);
+      ctx.lineTo(lerp(x + 130, x + 66, k), base - 140 * k);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#5a3b2e';
+    ctx.fillRect(x - 86, base - 260, 18, 120);
+    ctx.fillRect(x + 68, base - 260, 18, 120);
+    ctx.fillRect(x - 100, base - 236, 200, 14);
+    ctx.fillStyle = '#3a3f5c';
+    ctx.beginPath();
+    ctx.moveTo(x - 160, base - 250);
+    ctx.quadraticCurveTo(x - 120, base - 262, x - 100, base - 300);
+    ctx.lineTo(x + 100, base - 300);
+    ctx.quadraticCurveTo(x + 120, base - 262, x + 160, base - 250);
+    ctx.closePath();
+    ctx.fill();
+    // spirits
+    for (let i = 0; i < 5; i++) {
+      const sx = x - 260 + i * 130 + Math.sin(t * 1.3 + i) * 20;
+      const sy = base - 330 - (i % 2) * 70 + Math.sin(t * 2 + i * 1.7) * 18;
+      drawSprite(ctx, glowC, sx, sy, 90, 0, 0.8);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 15, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(sx - 30, sy + 10 + Math.sin(t * 4 + i) * 10, sx - 44, sy - 14);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // A traditional Japanese house with a round window.
+  function japaneseHouse(ctx, x, t) {
+    const base = 600;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#3a2a20';
+    ctx.lineWidth = 4;
+    ctx.fillStyle = '#8a5a34';
+    ctx.fillRect(x - 300, base - 40, 600, 40);
+    ctx.strokeRect(x - 300, base - 40, 600, 40);
+    ctx.fillStyle = '#f4efe6';
+    ctx.fillRect(x - 260, base - 170, 520, 130);
+    ctx.strokeRect(x - 260, base - 170, 520, 130);
+    ctx.strokeStyle = '#8a5a34';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i <= 5; i++) {
+      ctx.moveTo(x - 260 + i * 104, base - 170);
+      ctx.lineTo(x - 260 + i * 104, base - 40);
+    }
+    for (let i = 0; i < 3; i++) {
+      for (let r = 1; r < 4; r++) {
+        ctx.moveTo(x - 260 + i * 104 + 6, base - 170 + r * 32);
+        ctx.lineTo(x - 260 + i * 104 + 98, base - 170 + r * 32);
+      }
+      ctx.moveTo(x - 260 + i * 104 + 52, base - 166);
+      ctx.lineTo(x - 260 + i * 104 + 52, base - 44);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#e8dcc4';
+    ctx.strokeStyle = '#3a2a20';
+    ctx.beginPath();
+    ctx.arc(x + 160, base - 105, 44, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    for (let i = -1; i <= 1; i++) {
+      ctx.moveTo(x + 160 + i * 22, base - 147);
+      ctx.lineTo(x + 160 + i * 22, base - 63);
+      ctx.moveTo(x + 118, base - 105 + i * 22);
+      ctx.lineTo(x + 202, base - 105 + i * 22);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#3a3f5c';
+    ctx.beginPath();
+    ctx.moveTo(x - 340, base - 160);
+    ctx.quadraticCurveTo(x - 300, base - 172, x - 230, base - 250);
+    ctx.lineTo(x + 230, base - 250);
+    ctx.quadraticCurveTo(x + 300, base - 172, x + 340, base - 160);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(x - 230, base - 250);
+    ctx.lineTo(x + 230, base - 250);
+    ctx.lineTo(x + 200, base - 262);
+    ctx.lineTo(x - 200, base - 262);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  const LANDMARKS = [mansion, gateOfSpirits, japaneseHouse];
+
   function busScene(ctx, t) {
     const bx = busX(t);
     const speed = (busX(t + 0.02) - bx) / 0.02;
@@ -813,6 +1168,11 @@ export function createScenes({ feats, lyrics, meta }) {
       ctx.lineTo(x - 18 * s, 600 - 96 * s);
       ctx.fill();
     }
+    for (let k = 0; k < 3; k++) {
+      const lx = 1320 + k * STOP_GAP - bx + 380;
+      if (lx < -500 || lx > W + 500) continue;
+      LANDMARKS[k](ctx, lx, t);
+    }
     // road
     ctx.fillStyle = '#4d6e96';
     ctx.fillRect(0, 610, W, 190);
@@ -826,7 +1186,7 @@ export function createScenes({ feats, lyrics, meta }) {
     }
     // stops
     for (let k = 0; k < 3; k++) {
-      const sx = 1235 + k * STOP_GAP - bx;
+      const sx = 1320 + k * STOP_GAP - bx;
       if (sx < -100 || sx > W + 100) continue;
       ctx.strokeStyle = '#8fa3bf';
       ctx.lineWidth = 10;
@@ -846,6 +1206,35 @@ export function createScenes({ feats, lyrics, meta }) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(String(k + 1), sx, 454);
+      ctx.font = `900 28px ${FONT_JP}`;
+      const nw = ctx.measureText(STOP_NAMES[k]).width + 30;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#2f6ee0';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(sx - nw / 2, 512, nw, 44, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = PAL.navy;
+      ctx.fillText(STOP_NAMES[k], sx, 535);
+    }
+    // cherry petals around the second stop
+    const near = clamp(1 - Math.abs(1320 + STOP_GAP - bx - 1100) / 1500);
+    if (near > 0) {
+      for (let i = 0; i < 46; i++) {
+        const x = (((rand(i, 311) * 2200 - t * 160 - bx * 0.4) % 2200) + 2200) % 2200 - 140;
+        const y = ((rand(i, 312) * 900 + t * (60 + rand(i, 313) * 60)) % 900) - 20;
+        ctx.save();
+        ctx.globalAlpha = near * 0.9;
+        ctx.translate(x, y);
+        ctx.rotate(t * 2 + i);
+        ctx.scale(1, Math.cos(t * 3 + i) * 0.8 + 0.2);
+        ctx.fillStyle = i % 3 ? '#ffc1d9' : '#ff9cc4';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 11, 7, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
     }
     // bus
     if (t < POOF + 0.05) {
@@ -980,6 +1369,7 @@ export function createScenes({ feats, lyrics, meta }) {
       ctx.fill();
     });
     ctx.restore();
+    if (v) dm.draw(ctx, DM.stage1, t);
     // fireworks (second time round)
     if (v) {
       for (let k = 0; k < 4; k++) {
@@ -1018,7 +1408,7 @@ export function createScenes({ feats, lyrics, meta }) {
       star(ctx, mx + Math.cos(a) * ms * 0.95, my - ms * 0.1 + Math.sin(a) * ms * 0.7, 22 + pulse(t) * 10, 10);
       ctx.fill();
     }
-    drawMascot(ctx, mx, my, ms, t, { mood: 'happy', squash: 1 - hop, wave: 0.6 + hop * 0.4 });
+    actor(ctx, mx, my, ms, t, { mood: 'happy', squash: 1 - hop, wave: 0.6 + hop * 0.4 });
     // curtains
     const open = v ? 1 : easeInOut(inv(0, 1.2, lt));
     for (const side2 of [-1, 1]) {
@@ -1282,7 +1672,7 @@ export function createScenes({ feats, lyrics, meta }) {
     else if (lt >= 16 && lt < 21) mood = 'sleepy';
     else if (lt >= 21) mood = 'happy';
     const shiver = lt >= 16 && lt < 21 ? Math.sin(t * 70) * 5 : 0;
-    drawMascot(ctx, 1460 + shiver, 610 - Math.abs(Math.sin(feats.beat(tw) * Math.PI)) * (lt < 16 ? 40 : 0), 300, t, {
+    actor(ctx, 1460 + shiver, 610 - Math.abs(Math.sin(feats.beat(tw) * Math.PI)) * (lt < 16 ? 40 : 0), 300, t, {
       mood,
       sweat: lt >= 2.8 && lt < 16,
       squash: lt < 16 ? p : 0,
@@ -1306,6 +1696,15 @@ export function createScenes({ feats, lyrics, meta }) {
       ctx.drawImage(frost, -W / 2, -H / 2);
       ctx.restore();
     }
+    // frogs freeze along with the room (drawn over the frost)
+    [
+      [250, 770],
+      [1090, 790],
+      [1760, 790],
+    ].forEach(([fx, fy], i) => {
+      const k = easeOut(inv(s0 + 16.4 + i * 0.35, s0 + 17.4 + i * 0.35, t));
+      if (k > 0) frozenFrog(ctx, lerp(-150, fx, k), fy, 110, t, i);
+    });
   }
 
   // -------------------------------------------------------------------- pot
@@ -1427,17 +1826,156 @@ export function createScenes({ feats, lyrics, meta }) {
     ctx.restore();
   }
 
-  function potScene(ctx, t, lt) {
-    fillBg(ctx, ['#203a7a', '#162a5e', '#0f1c46']);
-    hexGrid(ctx, 80, 0, t * 4, 'rgba(127,220,255,0.06)', 2);
-    ctx.fillStyle = vGradient(ctx, ['#2a3f74', '#16234a'], FLOOR, H);
+  function torii(ctx, x, base, s) {
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#2a1420';
+    ctx.lineWidth = 4;
+    ctx.fillStyle = '#e2343f';
+    for (const sx of [-1, 1]) {
+      ctx.fillRect(x + sx * 150 * s - 18 * s, base - 500 * s, 36 * s, 500 * s);
+      ctx.strokeRect(x + sx * 150 * s - 18 * s, base - 500 * s, 36 * s, 500 * s);
+      ctx.fillStyle = '#2a2230';
+      ctx.fillRect(x + sx * 150 * s - 22 * s, base - 46 * s, 44 * s, 46 * s);
+      ctx.fillStyle = '#e2343f';
+    }
+    ctx.fillRect(x - 200 * s, base - 420 * s, 400 * s, 26 * s);
+    ctx.strokeRect(x - 200 * s, base - 420 * s, 400 * s, 26 * s);
+    ctx.fillRect(x - 220 * s, base - 488 * s, 440 * s, 24 * s);
+    ctx.fillStyle = '#2a2230';
+    ctx.beginPath();
+    ctx.moveTo(x - 270 * s, base - 528 * s);
+    ctx.quadraticCurveTo(x, base - 500 * s, x + 270 * s, base - 528 * s);
+    ctx.lineTo(x + 250 * s, base - 488 * s);
+    ctx.quadraticCurveTo(x, base - 470 * s, x - 250 * s, base - 488 * s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#2a2230';
+    ctx.fillRect(x - 34 * s, base - 470 * s, 68 * s, 50 * s);
+    ctx.strokeStyle = '#ffd36b';
+    ctx.strokeRect(x - 28 * s, base - 464 * s, 56 * s, 38 * s);
+    ctx.restore();
+  }
+
+  function shrineBg(ctx, t) {
+    fillBg(ctx, ['#232861', '#5b4796', '#d9797a', '#ffb27a']);
+    drawSprite(ctx, glowY, 1200, 560, 700, 0, 0.5);
+    ctx.fillStyle = '#3a2f5e';
+    ctx.beginPath();
+    ctx.moveTo(0, 640);
+    for (let x = 0; x <= W; x += 60) ctx.lineTo(x, 560 - Math.sin(x * 0.004) * 90 - Math.sin(x * 0.011) * 30);
+    ctx.lineTo(W, 640);
+    ctx.fill();
+    ctx.fillStyle = '#2a2350';
+    ctx.fillRect(0, 630, W, FLOOR - 630);
+    torii(ctx, 330, FLOOR, 1);
+    // shrine hall
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#2a1a14';
+    ctx.lineWidth = 4;
+    ctx.fillStyle = '#6b4228';
+    ctx.fillRect(1420, 470, 560, FLOOR - 470);
+    ctx.fillStyle = '#4a2c1a';
+    for (let i = 0; i < 4; i++) ctx.fillRect(1440 + i * 150, 470, 26, FLOOR - 470);
+    ctx.fillStyle = '#e9dcc0';
+    ctx.fillRect(1480, 540, 400, 170);
+    ctx.strokeRect(1480, 540, 400, 170);
+    ctx.beginPath();
+    for (let i = 1; i < 8; i++) {
+      ctx.moveTo(1480 + i * 50, 540);
+      ctx.lineTo(1480 + i * 50, 710);
+    }
+    for (let r = 1; r < 4; r++) {
+      ctx.moveTo(1480, 540 + r * 42);
+      ctx.lineTo(1880, 540 + r * 42);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#3a3150';
+    ctx.beginPath();
+    ctx.moveTo(1340, 480);
+    ctx.quadraticCurveTo(1460, 460, 1560, 330);
+    ctx.lineTo(1980, 330);
+    ctx.lineTo(1980, 480);
+    ctx.closePath();
+    ctx.fill();
+    // sacred rope with paper streamers
+    ctx.strokeStyle = '#d9c27a';
+    ctx.lineWidth = 18;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(1440, 505);
+    ctx.quadraticCurveTo(1680, 545, 1920, 505);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 4; i++) {
+      const sx = 1500 + i * 120;
+      const sy = 520 + Math.sin(i * 1.3) * 6;
+      const sw = Math.sin(t * 2 + i) * 4;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + 18 + sw, sy + 16);
+      ctx.lineTo(sx + 4 + sw, sy + 16);
+      ctx.lineTo(sx + 22 + sw, sy + 34);
+      ctx.lineTo(sx + 8 + sw, sy + 34);
+      ctx.lineTo(sx + 26 + sw, sy + 54);
+      ctx.lineTo(sx + 10 + sw, sy + 54);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // offering box
+    ctx.fillStyle = '#8a5a34';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.rect(1560, 720, 240, 110);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = '#4a2c1a';
+    ctx.beginPath();
+    for (let i = 1; i < 10; i++) {
+      ctx.moveTo(1560 + i * 24, 724);
+      ctx.lineTo(1560 + i * 24, 744);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `400 42px ${FONT_DISPLAY}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('賽銭', 1680, 790);
+    ctx.restore();
+    // drifting leaves
+    for (let i = 0; i < 24; i++) {
+      const x = (((rand(i, 331) * 2200 - t * 90) % 2200) + 2200) % 2200 - 140;
+      const y = ((rand(i, 332) * 900 + t * (50 + rand(i, 333) * 50)) % 900) - 20;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(t * 2 + i);
+      ctx.fillStyle = i % 2 ? '#ff8a5c' : '#ffc14d';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 5, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = vGradient(ctx, ['#a9a3b8', '#6c6684'], FLOOR, H);
     ctx.fillRect(0, FLOOR, W, H - FLOOR);
+    ctx.strokeStyle = 'rgba(40,30,60,0.25)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      ctx.moveTo(0, FLOOR + 30 + i * 60);
+      ctx.lineTo(W, FLOOR + 30 + i * 60);
+    }
+    ctx.stroke();
+  }
+
+  function potScene(ctx, t, lt) {
+    shrineBg(ctx, t);
     // spotlight
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const sg = ctx.createLinearGradient(0, 0, 0, FLOOR);
-    sg.addColorStop(0, 'rgba(255,245,200,0.35)');
-    sg.addColorStop(1, 'rgba(255,245,200,0.05)');
+    sg.addColorStop(0, 'rgba(255,235,190,0.22)');
+    sg.addColorStop(1, 'rgba(255,235,190,0.04)');
     ctx.fillStyle = sg;
     ctx.beginPath();
     ctx.moveTo(900, 0);
@@ -1454,20 +1992,20 @@ export function createScenes({ feats, lyrics, meta }) {
       draw();
       ctx.restore();
     };
-    // pedestal
-    ctx.fillStyle = '#e9f1ff';
-    ctx.strokeStyle = PAL.navy;
+    // wooden stand
+    ctx.fillStyle = '#c49a6c';
+    ctx.strokeStyle = '#3a2a20';
     ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.roundRect(760, 640, 400, 40, 8);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#c8d8f0';
+    ctx.fillStyle = '#a07a52';
     ctx.beginPath();
     ctx.rect(810, 680, 300, FLOOR - 700);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#e9f1ff';
+    ctx.fillStyle = '#c49a6c';
     ctx.beginPath();
     ctx.roundRect(740, FLOOR - 24, 440, 30, 8);
     ctx.fill();
@@ -1738,6 +2276,7 @@ export function createScenes({ feats, lyrics, meta }) {
     items.filter((it) => it.depth < 0).forEach(drawItem);
     const reelK = inv(sc.start + 5, sc.start + 5.5, t);
     const crystalA = 1 - reelK * 0.75;
+    magicCircle(ctx, 960, 430, 330, t * 0.3, '#c9b3ff', 0.6 * crystalA);
     drawSprite(ctx, glowW, 960, 430, 620 + pulse(t) * 120, 0, 0.5 * crystalA);
     drawSprite(ctx, flake, 960, 430, 420 * (1 + pulse(t) * 0.04), t * 0.4, crystalA);
     items.filter((it) => it.depth >= 0).forEach(drawItem);
@@ -2064,7 +2603,7 @@ export function createScenes({ feats, lyrics, meta }) {
       }
       const blink = Math.floor(t * 4) % 2;
       outlined(ctx, 'SERVER LOAD 999%', 960, 90, { size: 56, family: FONT_DISPLAY, weight: 400, fill: blink ? PAL.red : '#ffb3b3', outer: null });
-      drawMascot(ctx, 1750, 790, 190, t, { mood: 'shock', sweat: true, squash: p, wave: 1 });
+      actor(ctx, 1750, 790, 190, t, { mood: 'shock', sweat: true, squash: p, wave: 1 });
       ctx.restore();
     }
     // the instrumental break: circular equaliser + loading bar
@@ -2243,6 +2782,8 @@ export function createScenes({ feats, lyrics, meta }) {
     const p = pulse(t);
     fillBg(ctx, bi % 2 ? ['#0b1a4a', '#13235e'] : ['#13235e', '#1b2f78']);
     hexGrid(ctx, 90, t * 30, t * 12, `rgba(127,220,255,${0.12 + 0.25 * p})`, 3);
+    magicCircle(ctx, 960, 470, 470, t * 0.5, '#ff8fc8', 0.3 + 0.3 * p);
+    dm.draw(ctx, DM.rap, t);
     // speed stripes
     ctx.save();
     ctx.translate(960, 540);
@@ -2261,8 +2802,8 @@ export function createScenes({ feats, lyrics, meta }) {
     else if (t >= 198 && t < 203) icon = bowl;
     else if (t >= 203) icon = crown;
     const corners = [
-      [230, 200],
-      [1690, 200],
+      [230, 270],
+      [1690, 270],
       [230, 720],
       [1690, 720],
     ];
@@ -2326,6 +2867,7 @@ export function createScenes({ feats, lyrics, meta }) {
         ctx.fillText(rand(c * 31 + k, 223) < 0.5 ? '0' : '9', x, y0 - k * 52);
       }
     }
+    dm.draw(ctx, DM.number, t);
     const steps = clamp(Math.floor((t - 209.2) / P) + 1, 0, 14);
     const digits = '1' + '0'.repeat(steps * 3);
     const shown = commas(digits);
@@ -2412,10 +2954,12 @@ export function createScenes({ feats, lyrics, meta }) {
       ctx.save();
       ctx.globalAlpha = inv(272.4, 273.2, t);
       chalk(ctx, sub, 1270, 470, fitFont(ctx, sub, 36, FONT_JP, 700, 700), { color: 'rgba(200,240,255,0.95)' });
+      chalk(ctx, FANWORK, 1270, 530, 30, { color: 'rgba(255,190,215,0.95)' });
       ctx.restore();
     }
     const b = feats.beat(Math.min(t, 270));
-    drawMascot(ctx, 1580, 700 - Math.abs(Math.sin(b * Math.PI)) * 30, 260, t, { mood: 'happy', wave: 1, squash: t < 270 ? pulse(t) : 0 });
+    actor(ctx, 1580, 700 - Math.abs(Math.sin(b * Math.PI)) * 30, 260, t, { mood: 'happy', wave: 1, squash: t < 270 ? pulse(t) : 0 });
+    frozenFrog(ctx, 1330, 752, 96, t, 1);
     snow(ctx, t, { n: 40, alpha: 0.6 });
     const fade = inv(276.0, 278.4, t);
     if (fade > 0) {
@@ -2443,7 +2987,8 @@ export function createScenes({ feats, lyrics, meta }) {
   };
 
   const CAMERA = {
-    baka(t) {
+    baka(t, sc) {
+      if (sc.variant === 1) return null; // the STG frame stays still
       const p = pulse(t);
       return { z: 1.02 + p * 0.03, r: Math.sin(t * 1.3) * 0.012 };
     },
@@ -2466,6 +3011,8 @@ export function createScenes({ feats, lyrics, meta }) {
     camera: CAMERA[name],
     lyrics: LYRIC_MODE[name] || 'bottom',
     tokens: name !== 'cosmos',
+    // in STG mode the big lyrics live inside the playfield
+    ...(name === 'baka' && opts.variant === 1 ? { lyricCx: PLAYFIELD.x + PLAYFIELD.w / 2, lyricMaxW: PLAYFIELD.w - 100 } : {}),
   }));
 
   // extra white flashes on big moments
@@ -2476,6 +3023,25 @@ export function createScenes({ feats, lyrics, meta }) {
     at(t) {
       for (let i = list.length - 1; i >= 0; i--) if (t >= list[i].start) return list[i];
       return list[0];
+    },
+    /** spell card declarations and names, drawn above the scene */
+    spells(ctx, t) {
+      for (const sp of SPELLS) {
+        if (t < sp.t0 || t > sp.t1) continue;
+        if (sp.cutIn) {
+          const drawStar = (x, y, size) => actor(ctx, x, y, size, t, { mood: 'happy', wave: 1 });
+          ctx.save();
+          if (sp.stg) {
+            ctx.beginPath();
+            ctx.rect(PLAYFIELD.x, PLAYFIELD.y, PLAYFIELD.w, PLAYFIELD.h);
+            ctx.clip();
+          }
+          spellCutIn(ctx, t, sp.t0, drawStar, sp.stg ? '#ffb3d4' : '#7fdcff', sp.stg ? 920 : 1430);
+          ctx.restore();
+        }
+        const o = sp.stg ? { right: PLAYFIELD.x + PLAYFIELD.w - 24, y: 96 } : {};
+        spellBanner(ctx, t, sp.t0 + (sp.cutIn ? 0.9 : 0.2), sp.t1, sp.name, o);
+      }
     },
     /** drawn after the scene, before the lyrics */
     finish(ctx) {
