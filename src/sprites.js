@@ -154,14 +154,19 @@ function trim(src, x0, y0, w, h) {
   }
   if (!blobs.length) return null;
   const main = blobs.reduce((a, b) => (b.count > a.count ? b : a));
+  // Expression marks (?, !, sweat drops, swirl lines) float free of the body
+  // and must stay; only edge intrusions and tiny far-away specks go.
   const near = Math.min(w, h) * 0.12;
+  const speck = Math.max(40, Math.round(w * h * 0.0002));
   const keep = blobs.map((b) => {
     if (b === main) return true;
     const big = b.count >= main.count * 0.05;
-    if (b.edge && !big) return false;
+    if (big) return true;
+    if (b.edge) return false;
+    if (b.count >= speck) return true;
     const dx = Math.max(0, main.minX - b.maxX, b.minX - main.maxX);
     const dy = Math.max(0, main.minY - b.maxY, b.minY - main.maxY);
-    return big || Math.hypot(dx, dy) <= near;
+    return Math.hypot(dx, dy) <= near;
   });
   let left = w;
   let top = h;
