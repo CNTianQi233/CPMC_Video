@@ -29,8 +29,69 @@ function fmt(s) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/**
+ * The song is decoded once and played from a buffer, so seeking works with
+ * any static server (no HTTP Range support needed) and the clock is
+ * sample-accurate.
+ */
+async function loadSong(url) {
+  const actx = new AudioContext();
+  const buffer = await fetch(url)
+    .then((r) => {
+      if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+      return r.arrayBuffer();
+    })
+    .then((b) => actx.decodeAudioData(b));
+
+  let src = null;
+  let startedAt = 0;
+  let offset = 0;
+  const latency = () => (actx.outputLatency || 0) + (actx.baseLatency || 0);
+
+  const song = {
+    duration: buffer.duration,
+    get playing() {
+      return src !== null;
+    },
+    /** song position of what is being heard right now */
+    now() {
+      if (!src) return offset;
+      return Math.min(buffer.duration, Math.max(0, actx.currentTime - startedAt - latency()));
+    },
+    play() {
+      if (src) return;
+      if (offset >= buffer.duration) offset = 0;
+      actx.resume();
+      const node = actx.createBufferSource();
+      node.buffer = buffer;
+      node.connect(actx.destination);
+      node.onended = () => {
+        if (src !== node) return; // stopped by pause/seek
+        src = null;
+        offset = buffer.duration;
+      };
+      node.start(0, offset);
+      startedAt = actx.currentTime - offset;
+      src = node;
+    },
+    pause() {
+      if (!src) return;
+      offset = song.now();
+      const node = src;
+      src = null;
+      node.stop();
+    },
+    seek(t) {
+      const was = !!src;
+      song.pause();
+      offset = Math.min(buffer.duration, Math.max(0, t));
+      if (was) song.play();
+    },
+  };
+  return song;
+}
+
 async function startPlayer() {
-  const audio = document.getElementById('audio');
   const start = document.getElementById('start');
   const status = document.getElementById('status');
   const controls = document.getElementById('controls');
@@ -39,8 +100,9 @@ async function startPlayer() {
   const time = document.getElementById('time');
 
   let mv;
+  let song;
   try {
-    mv = await mvPromise;
+    [mv, song] = await Promise.all([mvPromise, loadSong('assets/song.mp3')]);
   } catch (err) {
     status.textContent = '読み込みに失敗しました: ' + err.message;
     return;
@@ -48,54 +110,36 @@ async function startPlayer() {
   if (mv.meta.title) document.getElementById('title').textContent = mv.meta.title;
   status.textContent = [mv.meta.artist, ...mv.meta.credits].filter(Boolean).join(' / ') || 'ready';
   start.classList.remove('loading');
-  seek.max = String(mv.duration);
-  const t0 = parseFloat(params.get('t')) || 0;
-  audio.currentTime = t0;
-  mv.render(ctx, t0);
-
-  // audio.currentTime advances in coarse steps; interpolate between updates
-  let anchorAudio = t0;
-  let anchorPerf = performance.now();
-  const now = () => {
-    if (audio.paused) return audio.currentTime;
-    const est = anchorAudio + (performance.now() - anchorPerf) / 1000;
-    if (Math.abs(est - audio.currentTime) > 0.08) {
-      anchorAudio = audio.currentTime;
-      anchorPerf = performance.now();
-      return anchorAudio;
-    }
-    return est;
-  };
-  const resync = () => {
-    anchorAudio = audio.currentTime;
-    anchorPerf = performance.now();
-  };
-  ['play', 'seeked', 'playing'].forEach((e) => audio.addEventListener(e, resync));
+  seek.max = String(song.duration);
+  song.seek(parseFloat(params.get('t')) || 0);
+  mv.render(ctx, song.now());
 
   let seeking = false;
   const loop = () => {
-    const t = now();
+    const t = song.now();
     mv.render(ctx, t);
     if (!seeking) seek.value = String(t);
-    time.textContent = `${fmt(t)} / ${fmt(mv.duration)}`;
-    toggle.textContent = audio.paused ? '▶' : '⏸';
+    time.textContent = `${fmt(t)} / ${fmt(song.duration)}`;
+    toggle.textContent = song.playing ? '⏸' : '▶';
     requestAnimationFrame(loop);
   };
 
-  const play = () => audio.play().catch(() => {});
-  const togglePlay = () => (audio.paused ? play() : audio.pause());
+  const togglePlay = () => {
+    if (song.playing) song.pause();
+    else song.play();
+    showControls();
+  };
 
   start.addEventListener('click', () => {
     start.remove();
-    play();
+    song.play();
     requestAnimationFrame(loop);
     showControls();
   });
   toggle.addEventListener('click', togglePlay);
   seek.addEventListener('input', () => {
     seeking = true;
-    audio.currentTime = parseFloat(seek.value);
-    resync();
+    song.seek(parseFloat(seek.value));
   });
   seek.addEventListener('change', () => (seeking = false));
   document.getElementById('full').addEventListener('click', () => {
@@ -108,8 +152,8 @@ async function startPlayer() {
       e.preventDefault();
       togglePlay();
     } else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
-      audio.currentTime = Math.max(0, audio.currentTime + (e.code === 'ArrowRight' ? 5 : -5));
-      resync();
+      song.seek(song.now() + (e.code === 'ArrowRight' ? 5 : -5));
+      showControls();
     } else if (e.key === 'f') {
       document.getElementById('full').click();
     }
@@ -119,9 +163,8 @@ async function startPlayer() {
   function showControls() {
     controls.classList.remove('hidden');
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => !audio.paused && controls.classList.add('hidden'), 2500);
+    hideTimer = setTimeout(() => song.playing && controls.classList.add('hidden'), 2500);
   }
   document.addEventListener('pointermove', showControls);
   document.addEventListener('pointerdown', showControls);
-  audio.addEventListener('pause', showControls);
 }
